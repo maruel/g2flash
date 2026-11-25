@@ -178,7 +178,7 @@ Third-party Python dependencies:
 
 | Package            | Needed for                          | Imported as |
 |--------------------|-------------------------------------|-------------|
-| `bleak`            | `g2://local` transport              | `bleak`     |
+| `bleak>=1.0`       | `g2://local` transport              | `bleak`     |
 | `websocket-client` | `g2://droidbridge` transport        | `websocket` |
 
 Both are imported lazily, so you only need to install the one for the transport
@@ -200,6 +200,12 @@ python3 -m venv venv
 With the venv activated (`source venv/bin/activate`) you can invoke the tool as
 `python g2flash.py ...`; otherwise use `./venv/bin/python g2flash.py ...`. Run
 `deactivate` to leave the environment.
+
+### Linux pairing
+
+The local flasher asks BlueZ to pair each arm when it connects, before OTA.
+Accept any pairing prompt on the computer. Use `--stop-before file_check`
+to check pairing and application authentication without starting OTA.
 
 ### macOS note
 
@@ -270,9 +276,9 @@ app, validated byte-for-byte against a real flash capture. The firmware image
 is an EVENOTA container of five or six components; each is streamed over the firmware
 data service (`...e1001`) as a FILE_CHECK subheader followed by 4 KB blocks,
 then an END check the glasses verify against a per-component CRC32C. Before
-BEGIN, it performs the stock control-channel authentication handshake; omitting
-that handshake appears to cause firmware 2.2.9 to close an otherwise busy GATT
-connection after about 30 seconds. OTA data fragments refresh the transfer watchdog. The
+BEGIN, it performs the stock control-channel authentication handshake. On Linux,
+BlueZ pairing also lets the link encrypt before the glasses' connection security
+timer expires. OTA data fragments refresh the transfer watchdog. The
 official OTA capture sends no EvenHub-control heartbeats between BEGIN and the
 final END, so neither does this flasher. DroidBridge flashes also reuse one HTTP connection
 instead of opening one per BLE fragment. If an ACK is lost, the flasher never

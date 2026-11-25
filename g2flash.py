@@ -13,7 +13,7 @@ command line:
       Drive the glasses directly from this machine's Bluetooth radio via bleak.
       addressType=public is a normal MAC ("D0:7A:47:82:09:67"); addressType=
       random is the macOS / CoreBluetooth peripheral-UUID style. (Local mode
-      needs `pip install bleak`.)
+      needs Bleak 1.0 or later.)
 
 Protocol:
   transport: aa21 envelope  aa 21 seq len totFrags fragIdx sid flag <pb> crc16LE(last frag)
@@ -25,10 +25,9 @@ Protocol:
      each write acked on notify as [opcode,status]; status 0 = OK else NAK.
   per-component CRC32C (MSB-first, init0, xorout0) is in the subheader, verified
   by the glasses on END.
-  Before BEGIN, authenticate on the CTRL channel with the stock app's
-  DEVICE_SETTINGS/AUTHENTICATION request. Firmware 2.2.9 appears to disconnect
-  an unauthenticated GATT client about 30 seconds after connection even while
-  OTA data is flowing.
+  On Linux, request BLE pairing on connect so BlueZ can enable link encryption
+  before the glasses' connection security timer expires. Before BEGIN, also
+  authenticate on CTRL with the stock app's DEVICE_SETTINGS/AUTHENTICATION request.
   The official-app OTA capture sends no EvenHub/CTRL heartbeat traffic between
   BEGIN and the final END. OTA data fragments themselves refresh the firmware's
   transfer watchdog, so this flasher likewise keeps CTRL traffic out of OTA.
@@ -490,8 +489,9 @@ class LocalBleTransport:
     discovered BLEDevice rather than connecting by raw address string — that is
     the only reliable path on macOS/CoreBluetooth (and is how the TS examples
     work)."""
-    def __init__(self, address, address_type=None, side=None):
+    def __init__(self, address, address_type=None, side=None, pair: bool = False):
         self.address=address; self.address_type=address_type; self.side=side
+        self.pair = pair
         self.notes=queue.Queue()
         self.client=None
         self.disconnected_event=threading.Event()
@@ -560,7 +560,7 @@ class LocalBleTransport:
                 if DEBUG and not self._disconnect_requested:
                     detail=f"; {self.disconnect_detail}" if self.disconnect_detail else ""
                     print(f"    [BLE disconnected unexpectedly{detail}]")
-            self.client=BleakClient(dev, disconnected_callback=on_disconnect)
+            self.client = BleakClient(dev, disconnected_callback=on_disconnect, pair=self.pair)
             await self.client.connect()
             self._install_disconnect_error_hook()
         self._call(_c())
@@ -935,7 +935,9 @@ def main(argv=None):
         addr=conn[side]
         print(f"\n=== flashing {side} lens ({addr}) ===")
         if conn['method']=='local':
-            tp=LocalBleTransport(addr, conn.get('address_type'), side=side)
+            # Discovery-only runs can inspect GATT without creating a bond.
+            pair = sys.platform == "linux" and allowed("heartbeat", args.stop_before)
+            tp = LocalBleTransport(addr, conn.get('address_type'), side=side, pair=pair)
         else:
             tp=DroidBridgeTransport(bridge, addr)
         try:
