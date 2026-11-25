@@ -25,9 +25,9 @@ Protocol:
      each write acked on notify as [opcode,status]; status 0 = OK else NAK.
   per-component CRC32C (MSB-first, init0, xorout0) is in the subheader, verified
   by the glasses on END.
-  On Linux, request BLE pairing on connect so BlueZ can enable link encryption
-  before the glasses' connection security timer expires. Before BEGIN, also
-  authenticate on CTRL with the stock app's DEVICE_SETTINGS/AUTHENTICATION request.
+  On Linux, request BLE pairing on connect so BlueZ can enable link encryption.
+  Before BEGIN, authenticate on CTRL with the stock app's
+  DEVICE_SETTINGS/AUTHENTICATION request.
   The official-app OTA capture sends no EvenHub/CTRL heartbeat traffic between
   BEGIN and the final END. OTA data fragments themselves refresh the firmware's
   transfer watchdog, so this flasher likewise keeps CTRL traffic out of OTA.
@@ -37,6 +37,7 @@ Protocol:
 import time, json, struct, threading, queue, asyncio, sys, argparse, re, os, random, zlib, tempfile, types
 import urllib.parse
 import http.client
+from typing import Optional
 
 # Debug fault injection (env-driven): force a single failure on component
 # G2_FAULT_COMPONENT, block G2_FAULT_BLOCK, mode G2_FAULT_MODE ('frag'|'ack').
@@ -489,7 +490,7 @@ class LocalBleTransport:
     discovered BLEDevice rather than connecting by raw address string — that is
     the only reliable path on macOS/CoreBluetooth (and is how the TS examples
     work)."""
-    def __init__(self, address, address_type=None, side=None, pair: bool = False):
+    def __init__(self, address: str, address_type: Optional[str], side: str, pair: bool):
         self.address=address; self.address_type=address_type; self.side=side
         self.pair = pair
         self.notes=queue.Queue()

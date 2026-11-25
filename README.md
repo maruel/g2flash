@@ -277,8 +277,8 @@ is an EVENOTA container of five or six components; each is streamed over the fir
 data service (`...e1001`) as a FILE_CHECK subheader followed by 4 KB blocks,
 then an END check the glasses verify against a per-component CRC32C. Before
 BEGIN, it performs the stock control-channel authentication handshake. On Linux,
-BlueZ pairing also lets the link encrypt before the glasses' connection security
-timer expires. OTA data fragments refresh the transfer watchdog. The
+it also requests BlueZ pairing to enable Bluetooth link encryption.
+OTA data fragments refresh the transfer watchdog. The
 official OTA capture sends no EvenHub-control heartbeats between BEGIN and the
 final END, so neither does this flasher. DroidBridge flashes also reuse one HTTP connection
 instead of opening one per BLE fragment. If an ACK is lost, the flasher never
