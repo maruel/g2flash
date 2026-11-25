@@ -242,7 +242,7 @@ def main(argv=None):
         lens = args.lens
         print(f"{lens}: connecting")
         transport = (DroidBridgeTransport(bridge, connection[lens]) if bridge else
-                     LocalBleTransport(connection[lens], connection['address_type'], side=lens))
+                     LocalBleTransport(connection[lens], connection['address_type'], side=lens, pair=False))
         try:
             send_probe(transport, messages, args.mtu, args.ack_timeout, args.seq, LENS_BITS[args.targets])
         finally:
