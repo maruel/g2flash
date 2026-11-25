@@ -10,29 +10,140 @@ firmware mods, or use the flashing tool built in to Faceclaw's onboarding
 process (both versions install the same firmware image). Installing using
 Faceclaw is a bit more user friendly than installing using g2flash.
 
-This repository contains patches applied to firmware, but does not contain the
-Even Realities firmware itself. The `build_cfw.sh` script will download the base
-firmware from Even's CDN, apply patches, and verify that the resulting firmware
-has the expected hash for you.
+## Flash the glasses
 
-Flashing a custom firmware will void your warranty. This tool will require you
-to acknowledge that you are voiding your warranty when you run it.
+> **Flashing custom firmware voids your warranty and can brick the glasses.**
+> Proceed only if you understand and accept the risk.
 
-DEVELOPING YOUR OWN FIRMWARE MODS IS MUCH RISKIER THAN INSTALLING FIRMWARE THAT
-HAS ALREADY BEEN TESTED. If you are considering writing firmware mods and you
-can complete a project using only phone-side changes, you are almost certainly
-better off doing it that way. It is a bad idea to work in this codebase using a
-non-frontier language model, or without a proper coding harness, or a
-nontechnical user steering.
+### 1. Build the firmware image
 
-Changes that involve overwriting parts of the existing firmware are more risky
-than changes to the existing C extension files. Changes that run or affect
-behavior prior to receiving any custom messages are especially risky, because
-if you make the glasses crash on boot, they won't be able to accept an OTA
-update. Rebasing the mods onto a new base firmware is an especially hazardous
-operation, since it requires updating every firmware offset correctly and not
-missing any.
+On the computer that will run the flasher, you need Python 3 with `venv`,
+internet access, `curl` or `wget`, and `shasum` or `sha256sum`. Run this from
+the g2flash checkout.
 
+```bash
+./build_cfw.sh
+```
+
+The script sets up `./venv` with the flasher's dependencies, downloads stock
+G2 2.3.0.24 from Even's CDN, and applies the committed patches. It verifies
+both images against pinned SHA-256 hashes and leaves the result in
+`g2_2.3.0.24_cfw.bin`. Applying the committed patch set requires no compiler.
+
+On Debian or Ubuntu, install `python3-venv` if Python reports that
+`ensurepip` is unavailable. If the failed build already created `venv/`,
+run `python3 -m venv venv` to complete its setup before retrying the build.
+
+### 2. Choose and set up a connection
+
+Power on both arms and keep the glasses close to the computer or Android phone
+that will connect to them.
+
+#### Direct Bluetooth on Linux or macOS
+
+1. Turn off Bluetooth on the phone that normally connects to the glasses so
+   both arms advertise. If another app on the computer is connected to the
+   glasses, disconnect it too.
+2. On Linux, make sure BlueZ has a pairing agent and accept any prompts when
+   the flasher requests pairing. If you have no desktop pairing agent, open
+   `bluetoothctl`, run `agent on` and `default-agent`, and keep it open while
+   running the flasher in another terminal. On macOS, allow Bluetooth access
+   for your terminal if prompted. CoreBluetooth manages pairing and may prompt
+   for each arm.
+3. Find both arms with the Bluetooth scanner.
+
+```bash
+./venv/bin/python scan_g2.py
+```
+
+Pick the `_L_` and `_R_` names with the same pair number. Use the addresses
+printed by the scan. Linux prints MAC addresses and macOS prints CoreBluetooth
+UUIDs. Replace the placeholders in this command.
+
+```bash
+connection='g2://local?left=<left-address>&right=<right-address>'
+```
+
+#### Through an Android phone running DroidBridge
+
+Use a phone already bonded to both arms. Leave its Bluetooth on, start
+DroidBridge, and make sure the computer can reach the bridge. Fill in the
+phone's host and port, the bridge token if configured, and both arms' MAC
+addresses. Omit the `token` parameter if the bridge has no token.
+[DroidBridge setup](https://github.com/jimrandomh/droidbridge#readme)
+
+```bash
+connection='g2://droidbridge?phone=<host>&port=<port>&token=<token>&left=<left-mac>&right=<right-mac>'
+```
+
+### 3. Check the connection before starting OTA
+
+Use the connection string you just set. This checks discovery and application
+authentication on both arms. Direct Linux connections can create a Bluetooth
+bond during this check. The command stops before OTA BEGIN and FILE_CHECK.
+`--my-warranty-is-void` skips the warranty prompt for this connection check.
+
+```bash
+./venv/bin/python g2flash.py -c "$connection" -f g2_2.3.0.24_cfw.bin \
+  --stop-before file_check --my-warranty-is-void
+```
+
+Look for `authentication: ok` on both arms and `all selected lenses completed.`.
+If an arm is missing from the scan, check that it is powered on and that the
+phone is disconnected when using direct Bluetooth.
+
+### 4. Flash and verify both arms
+
+```bash
+./venv/bin/python g2flash.py -c "$connection" -f g2_2.3.0.24_cfw.bin
+```
+
+Type `my warranty is void` at the prompt. The flasher processes the arms one at
+a time. Wait for `all 6 components verified` on each arm, then for
+`all selected lenses completed.`. Let the glasses reboot before reconnecting
+them to your phone.
+
+## Usage
+
+```text
+./venv/bin/python g2flash.py -c <connection-string> -f <firmware.bin> [options]
+```
+
+- `--lens left|right|both` selects which arm to flash. The default is `both`.
+- `--stop-before discover|heartbeat|file_check|flash|done` stops at a stage.
+  Use `heartbeat` to stop after discovery, `file_check` to authenticate and stop
+  before OTA, or `flash` to send BEGIN and the first FILE_CHECK and stop before
+  sending firmware data. `done` runs the full flash.
+- `--my-warranty-is-void` skips interactive warranty confirmation for
+  automation.
+- `--component-retries N` and `--block-nak-retries N` tune transfer retries.
+- `--reconnect-attempts N` and `--reconnect-delay SECONDS` tune recovery after
+  the flasher loses an ACK.
+- `--debug` prints received BLE frames.
+
+Run `./venv/bin/python g2flash.py --help` for the full CLI reference and
+`./build_cfw.sh --help` for build options. A local connection string also
+accepts the optional `addressType` label (`public` for a MAC address or
+`random` for a CoreBluetooth UUID).
+
+After a length-preserving binary patch, run
+`./venv/bin/python g2flash.py --recompute-checksums g2_2.3.0.24_cfw.bin`
+to update the component CRC32C and main application preamble CRC32 in place.
+This command exits without connecting to the glasses.
+
+### Manage the Python environment manually
+
+```bash
+python3 -m venv venv
+./venv/bin/python -m pip install --upgrade pip
+./venv/bin/python -m pip install -r requirements.txt
+./build_cfw.sh --skip-venv
+```
+
+The local transport uses `bleak>=1.0` and DroidBridge uses
+`websocket-client`. You only need the package for the transport you use.
+Firmware parsing, validation, and checksum updates use the Python standard
+library.
 
 ## Modifications
 
@@ -105,38 +216,27 @@ it to stock behavior. You can also go back to stock firmware by installing an
 unmodified firmware image using g2flash, or the "Uninstall firmware" menu item
 in Faceclaw.
 
+## Developing firmware patches
 
-## Using the Flash Tool
+DEVELOPING YOUR OWN FIRMWARE MODS IS MUCH RISKIER THAN INSTALLING FIRMWARE THAT
+HAS ALREADY BEEN TESTED. If you are considering writing firmware mods and you
+can complete a project using only phone-side changes, you are almost certainly
+better off doing it that way. It is a bad idea to work in this codebase using a
+non-frontier language model, or without a proper coding harness, or a
+nontechnical user steering.
 
-`g2flash.py` flashes firmware onto Even Realities G2 smart glasses by
-reimplementing the official app's BLE flash protocol. It is the tool used to
-push custom firmware (a patched `*_cfw.bin` image) onto the device.
+Changes that involve overwriting parts of the existing firmware are more risky
+than changes to the existing C extension files. Changes that run or affect
+behavior prior to receiving any custom messages are especially risky, because
+if you make the glasses crash on boot, they won't be able to accept an OTA
+update. Rebasing the mods onto a new base firmware is an especially hazardous
+operation, since it requires updating every firmware offset correctly and not
+missing any.
 
-> **WARNING — this voids your warranty and can brick the glasses.**
-> Flashing custom firmware over the OTA path carries a real risk of bricking
-> the device. The tool makes you type `my warranty is void` at an interactive
-> prompt before it will write anything (use `--my-warranty-is-void` to skip the
-> prompt for automation). Only proceed if you understand and accept the risk.
-
-## Quick start
-
-```bash
-cd g2flash
-./build_cfw.sh                       # set up venv, download stock fw, patch, verify
-./venv/bin/python g2flash.py -c g2://local -f g2_2.3.0.24_cfw.bin
-```
-
-`build_cfw.sh` does the whole build: it creates `./venv` with the flasher's
-dependencies, downloads the stock **G2 2.3.0.24** firmware from Even's CDN,
-applies the patches in `patches/`, and verifies that both the download and the
-patched result match pinned SHA-256 hashes (so a clean run proves you got
-exactly the reviewed image). Run `./build_cfw.sh --help` for options
-(`--skip-venv`, `--force-download`). Then flash as shown above — see
-[Usage](#usage) for connection strings and safety flags.
-
-## What's in this directory
+### What's in this directory
 
 - `g2flash.py` — the flasher.
+- `scan_g2.py` — lists nearby arms and their Bluetooth addresses.
 - `build_cfw.sh` — one-shot venv setup + download + patch + verify (see above).
 - `patches/` — the patch sources and tools:
   - `cfw_patches.json` — the **committed patch set**: a list of
@@ -164,110 +264,6 @@ exactly the reviewed image). Run `./build_cfw.sh --help` for options
 
 Firmware images (`g2_2.3.0.24*.bin`) are **not** checked in — they are Even's
 firmware, so you build them locally with `build_cfw.sh`.
-
-## Requirements
-
-- Python 3.x
-- One of two transports to reach the glasses:
-  - **local** — this machine's own Bluetooth radio, via the `bleak` package.
-  - **droidbridge** — a bonded Android phone running
-    [DroidBridge](../droidbridge) that forwards GATT over HTTP/WebSocket; uses
-    the `websocket-client` package.
-
-Third-party Python dependencies:
-
-| Package            | Needed for                          | Imported as |
-|--------------------|-------------------------------------|-------------|
-| `bleak>=1.0`       | `g2://local` transport              | `bleak`     |
-| `websocket-client` | `g2://droidbridge` transport        | `websocket` |
-
-Both are imported lazily, so you only need to install the one for the transport
-you actually use. Firmware parsing, validation, and `--recompute-checksums` run
-on the standard library alone.
-
-## Setting up the venv
-
-`build_cfw.sh` creates and populates `./venv` for you as part of a normal run.
-To set it up by hand instead:
-
-```bash
-cd g2flash
-python3 -m venv venv
-./venv/bin/python -m pip install --upgrade pip
-./venv/bin/python -m pip install -r requirements.txt
-```
-
-With the venv activated (`source venv/bin/activate`) you can invoke the tool as
-`python g2flash.py ...`; otherwise use `./venv/bin/python g2flash.py ...`. Run
-`deactivate` to leave the environment.
-
-### Linux pairing
-
-The local flasher asks BlueZ to pair each arm when it connects, before OTA.
-Accept any pairing prompt on the computer. Use `--stop-before file_check`
-to check pairing and application authentication without starting OTA.
-
-### macOS note
-
-On macOS, `bleak` talks to CoreBluetooth, which never exposes BLE MAC
-addresses — scanned addresses are random per-host UUIDs. `g2flash` works around
-this by scanning and matching the last three MAC bytes embedded in the arm's
-advertised name (`Even G2_32_L_693CCB`). For a local flash the arm must be
-powered on and **not** connected to the phone (quit the Even app / turn off the
-phone's Bluetooth) so it advertises for a direct connection. The first time you
-run it, macOS will prompt to grant your terminal Bluetooth permission.
-
-## Usage
-
-```
-python g2flash.py -c <connection-string> -f <firmware.bin> [options]
-```
-
-Connection strings:
-
-```
-# direct from this machine's Bluetooth radio (needs bleak)
-g2://local?left=<addr>&right=<addr>&addressType=public|random
-
-# through a bonded phone running DroidBridge (needs websocket-client)
-g2://droidbridge?phone=<host>&port=<port>&token=<tok>&left=<mac>&right=<mac>
-```
-
-`addressType=public` is a normal MAC (`D0:7A:47:82:09:67`); `random` is the
-macOS/CoreBluetooth peripheral-UUID style.
-
-Common options:
-
-- `--lens left|right|both` — which arm to flash (default `both`).
-- `--stop-before discover|heartbeat|file_check|flash|done` — dry-run gate that
-  halts before the named stage; use it to test connectivity without writing.
-- `--my-warranty-is-void` — skip the interactive warranty confirmation.
-- `--component-retries N` / `--block-nak-retries N` — transfer retry tuning.
-- `--reconnect-attempts N` / `--reconnect-delay SECONDS` — recovery tuning when
-  an ACK timeout indicates that the arm dropped its GATT connection.
-- `--debug` — print received BLE frames.
-
-`--recompute-checksums IMAGE` rewrites an image's stored checksums in place
-(component CRC32C + mainApp preamble CRC32) to match its current payloads and
-exits without connecting. Run it after any length-preserving binary patch —
-otherwise the glasses reject the component on END with status 7 (CHECK_FAIL).
-
-### Examples
-
-```bash
-# dry run: connect to both arms over the local radio and stop before any write
-python g2flash.py \
-  -c 'g2://local?left=AA:BB:CC:11:22:33&right=AA:BB:CC:44:55:66&addressType=public' \
-  -f g2_2.3.0.24.bin --stop-before flash
-
-# fix checksums after patching, no device needed
-python g2flash.py --recompute-checksums g2_2.3.0.24_cfw.bin
-
-# flash the custom firmware to both arms via DroidBridge
-python g2flash.py \
-  -c 'g2://droidbridge?phone=192.168.1.50&port=8080&token=secret&left=AA:BB:CC:11:22:33&right=AA:BB:CC:44:55:66' \
-  -f g2_2.3.0.24_cfw.bin
-```
 
 ## How it works (brief)
 
